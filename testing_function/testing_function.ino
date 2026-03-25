@@ -54,11 +54,12 @@ constexpr uint32_t MIC_SAMPLE_RATE = 16000;
 constexpr size_t MIC_BLOCK_SAMPLES = 256;
 
 constexpr int CONFIG_BUTTON_PIN = 33;
-constexpr unsigned long CONFIG_HOLD_MS = 5000;
+constexpr unsigned long CONFIG_HOLD_MS = 1500;
 constexpr unsigned long OLED_REFRESH_MS = 300;
-constexpr unsigned long SERIAL_STATUS_MS = 300;
+constexpr unsigned long SERIAL_STATUS_MS = 1000;
 constexpr unsigned long REPORT_INTERVAL_MS = 3000;
 constexpr unsigned long SENSOR_RECOVERY_MS = 2000;
+constexpr unsigned long WIFI_RETRY_AFTER_FAIL_MS = 600000;
 constexpr int SOUND_THRESHOLD = 100000;
 constexpr int SOUND_GAUGE_MAX = SOUND_THRESHOLD;
 constexpr unsigned long WIFI_CONNECT_TIMEOUT_MS = 12000;
@@ -111,6 +112,7 @@ unsigned long lastReportMs = 0;
 unsigned long lastSerialStatusMs = 0;
 unsigned long rebootAfterSaveMs = 0;
 unsigned long sensorRecoveryUntilMs = 0;
+unsigned long nextWifiRetryMs = 0;
 String configApSsid = "";
 String configApIp = "";
 String configStatusLine = "";
@@ -194,6 +196,10 @@ String getMacBasedBoxId() {
     static_cast<uint8_t>(mac)
   );
   return String(boxId);
+}
+
+String configHoldSecondsLabel() {
+  return String(CONFIG_HOLD_MS / 1000);
 }
 
 String defaultApSsid() {
@@ -598,10 +604,10 @@ void renderConfigInfoOLED(const String &ssid, const String &ipLine, const String
   drawTextLine(6, 4, "CONFIG MODE", 1);
   drawTextLine(6, 18, "SSID", 1);
   drawTextLine(34, 18, ssid, 1);
-  drawTextLine(6, 30, "PHONE", 1);
-  drawTextLine(40, 30, "AUTO POPUP", 1);
-  drawTextLine(6, 40, ipLine, 1);
-  drawTextLine(6, 52, statusLine, 1);
+  drawTextLine(6, 30, "WEB", 1);
+  drawTextLine(30, 30, ipLine, 1);
+  drawTextLine(6, 44, "STATUS", 1);
+  drawTextLine(6, 54, statusLine, 1);
   flushOLED();
 }
 
@@ -643,11 +649,8 @@ void renderQrCode(int originX, int originY, const String &payload) {
 void renderConfigQrOLED(const String &ssid, const String &ipLine) {
   clearBuffer();
   drawRect(0, 0, 128, 64, true);
-  drawTextLine(6, 4, "SCAN QR", 1);
-  drawTextLine(72, 8, "WIFI", 1);
-  drawTextLine(72, 18, ssid, 1);
-  drawTextLine(72, 34, "OPEN", 1);
-  drawTextLine(72, 44, ipLine, 1);
+  drawTextLine(78, 10, "WIFI", 1);
+  drawTextLine(78, 22, ssid, 1);
   renderQrCode(6, 6, "http://" + ipLine);
   flushOLED();
 }
@@ -667,11 +670,13 @@ void renderConfigOLED(const String &ssid, const String &ipLine, const String &st
 void renderWifiConnectOLED(const String &ssid, const String &statusLine) {
   clearBuffer();
   drawRect(0, 0, 128, 64, true);
-  drawTextLine(6, 4, "WIFI CONNECT", 1);
+  drawTextLine(6, 4, "CONFIG MODE", 1);
   drawTextLine(6, 18, "SSID", 1);
   drawTextLine(34, 18, ssid, 1);
-  drawTextLine(6, 34, statusLine, 1);
-  drawTextLine(6, 50, "PLEASE WAIT", 1);
+  drawTextLine(6, 30, "WEB", 1);
+  drawTextLine(30, 30, configApIp.isEmpty() ? "192.168.4.1" : configApIp, 1);
+  drawTextLine(6, 44, "STATUS", 1);
+  drawTextLine(6, 54, statusLine, 1);
   flushOLED();
 }
 
@@ -682,12 +687,14 @@ bool connectToSavedWifi() {
     return false;
   }
 
+  WiFi.disconnect(true, true);
+  delay(100);
   WiFi.mode(WIFI_STA);
   WiFi.begin(settings.wifiSsid.c_str(), settings.wifiPassword.c_str());
 
   Serial.print("Connecting to WiFi SSID: ");
   Serial.println(settings.wifiSsid);
-  renderWifiConnectOLED(settings.wifiSsid, "CONNECTING");
+  renderWifiConnectOLED(settings.wifiSsid, "CONNECTING...");
 
   unsigned long started = millis();
   int dotCount = 0;
@@ -695,7 +702,7 @@ bool connectToSavedWifi() {
     delay(250);
     Serial.print(".");
     dotCount = (dotCount + 1) % 7;
-    String statusLine = "CONNECT";
+    String statusLine = "CONNECTING";
     for (int i = 0; i < dotCount; ++i) {
       statusLine += ".";
     }
@@ -705,13 +712,15 @@ bool connectToSavedWifi() {
 
   wifiConnected = WiFi.status() == WL_CONNECTED;
   if (wifiConnected) {
+    nextWifiRetryMs = 0;
     Serial.print("WiFi connected, IP: ");
     Serial.println(WiFi.localIP());
-    renderWifiConnectOLED(settings.wifiSsid, WiFi.localIP().toString());
+    renderWifiConnectOLED(settings.wifiSsid, "COMPLETE");
     delay(700);
   } else {
+    nextWifiRetryMs = millis() + WIFI_RETRY_AFTER_FAIL_MS;
     Serial.println("WiFi connect failed");
-    renderWifiConnectOLED(settings.wifiSsid, "CONNECT FAIL");
+    renderWifiConnectOLED(settings.wifiSsid, "CONNECTION FAIL");
     delay(900);
   }
   return wifiConnected;
@@ -753,9 +762,15 @@ void resetReportWindow() {
 bool ensureWifiConnected() {
   if (WiFi.status() == WL_CONNECTED) {
     wifiConnected = true;
+    nextWifiRetryMs = 0;
     return true;
   }
   wifiConnected = false;
+
+  if (nextWifiRetryMs != 0 && millis() < nextWifiRetryMs) {
+    return false;
+  }
+
   return connectToSavedWifi();
 }
 
@@ -860,7 +875,7 @@ void handleConfigSave() {
   saveSettings(newSettings);
 
   configQrView = false;
-  renderConfigOLED(defaultApSsid(), WiFi.softAPIP().toString(), "SAVED REBOOT");
+  renderConfigOLED(defaultApSsid(), WiFi.softAPIP().toString(), "COMPLETE");
   configServer.send(200, "text/html",
     "<!doctype html><html><body style='font-family:Arial;padding:24px'>"
     "<h2>Saved</h2><p>Configuration saved. Device will reboot in 2 seconds.</p></body></html>");
@@ -922,9 +937,9 @@ void beginConfigPortal() {
   Serial.print("Open browser at: http://");
   Serial.println(ip);
   Serial.println("Captive portal enabled: phone should open config page automatically");
-  Serial.println("Hold red button 5s again to exit config mode");
+  Serial.println("Hold red button " + configHoldSecondsLabel() + "s again to exit config mode");
 
-  renderConfigOLED(apSsid, ip.toString(), "CONNECT AP");
+  renderConfigOLED(apSsid, ip.toString(), "WAITING");
 }
 
 void updateConfigButton() {
@@ -1005,7 +1020,7 @@ void setup() {
   Serial.println("OLED pins: SDA=22 SCL=23");
   Serial.println("PMS5003 pins: TXD=16 RXD=17");
   Serial.println("INMP441 pins: SCK=27 WS=14 SD=26 L/R reserved at GPIO12");
-  Serial.println("CONFIG button: GPIO33 -> GND (hold 5s to toggle config mode)");
+  Serial.println("CONFIG button: GPIO33 -> GND (hold " + configHoldSecondsLabel() + "s to toggle config mode)");
 
   if (!initOLED()) {
     Serial.println("OLED init failed");
