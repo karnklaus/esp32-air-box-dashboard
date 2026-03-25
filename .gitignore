@@ -1,0 +1,8 @@
+.vscode/
+__pycache__/
+*.pyc
+
+data/*.json
+data/*.db
+!data/.gitkeep
+

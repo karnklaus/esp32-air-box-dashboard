@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Bangkok Air Box Config</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap"
+      rel="stylesheet"
+    >
+    <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+  </head>
+  <body>
+    <main class="layout">
+      <section class="hero hero-compact">
+        <div class="hero-copy">
+          <p class="eyebrow">Bangkok Air Grid</p>
+          <h1><span class="hero-kicker">Urban Air</span>Config</h1>
+        </div>
+      </section>
+      <nav class="top-nav">
+        <a class="top-nav-link" href="{{ url_for('index') }}">Dashboard</a>
+        <a class="top-nav-link" href="{{ url_for('overview_page') }}">Overview</a>
+        <a class="top-nav-link active" href="{{ url_for('config_page') }}">Config</a>
+      </nav>
+
+      <section class="config-grid">
+        <article class="config-card">
+          <p class="panel-tag">For ESP32</p>
+          <h2>Server Address</h2>
+          <div class="config-row">
+            <span class="config-label">Server IP</span>
+            <strong class="config-value">{{ server_config.server_ip }}</strong>
+          </div>
+          <div class="config-row">
+            <span class="config-label">Port</span>
+            <strong class="config-value">{{ server_config.server_port }}</strong>
+          </div>
+        </article>
+
+        <article class="config-card">
+          <p class="panel-tag">API Endpoint</p>
+          <h2>Report URL</h2>
+          <div class="config-endpoint">{{ server_config.report_url }}</div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>
