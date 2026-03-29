@@ -4,11 +4,14 @@ const totalEl = document.getElementById("overview-total");
 const onlineEl = document.getElementById("overview-online");
 const loudEl = document.getElementById("overview-loud");
 const avgPm25El = document.getElementById("overview-avg-pm25");
+const avgTempEl = document.getElementById("overview-avg-temp");
+const avgHumidityEl = document.getElementById("overview-avg-humidity");
 const pm25ChartEl = document.getElementById("overview-pm25-chart");
 const profileChartEl = document.getElementById("overview-profile-chart");
 const tableBodyEl = document.getElementById("overview-table-body");
 const overviewMetricTitleEl = document.getElementById("overview-metric-title");
 const overviewHistoryTitleEl = document.getElementById("overview-history-title");
+const overviewClimateHistoryTitleEl = document.getElementById("overview-climate-history-title");
 const districtFilterEl = document.getElementById("filter-district");
 const onlineFilterEl = document.getElementById("filter-online");
 const loudFilterEl = document.getElementById("filter-loud");
@@ -16,8 +19,11 @@ const historyBoxEl = document.getElementById("history-box");
 const historyShowPm1El = document.getElementById("history-show-pm1");
 const historyShowPm25El = document.getElementById("history-show-pm25");
 const historyShowPm10El = document.getElementById("history-show-pm10");
+const historyShowTempEl = document.getElementById("history-show-temp");
+const historyShowHumidityEl = document.getElementById("history-show-humidity");
 const exportCsvBtn = document.getElementById("export-csv-btn");
 const historyChartEl = document.getElementById("overview-history-chart");
+const climateHistoryChartEl = document.getElementById("overview-climate-history-chart");
 
 let currentBoxes = Array.isArray(window.INITIAL_AIR_BOXES) ? window.INITIAL_AIR_BOXES : [];
 let districtOptions = [];
@@ -25,6 +31,8 @@ let districtOptions = [];
 function metricLabel(metric) {
   if (metric === "pm1_0") return "PM1.0";
   if (metric === "pm10") return "PM10";
+  if (metric === "temperature_c") return "TEMP";
+  if (metric === "humidity_rh") return "HUM";
   return "PM2.5";
 }
 
@@ -33,6 +41,13 @@ function selectedHistoryMetrics() {
   if (historyShowPm1El?.checked) metrics.push("pm1_0");
   if (historyShowPm25El?.checked) metrics.push("pm2_5");
   if (historyShowPm10El?.checked) metrics.push("pm10");
+  return metrics;
+}
+
+function selectedClimateHistoryMetrics() {
+  const metrics = [];
+  if (historyShowTempEl?.checked) metrics.push("temperature_c");
+  if (historyShowHumidityEl?.checked) metrics.push("humidity_rh");
   return metrics;
 }
 
@@ -82,6 +97,28 @@ function pmLevelClass(value) {
 function mean(values) {
   if (!values.length) return 0;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function climateValue(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function climateText(value, suffix) {
+  const numeric = climateValue(value);
+  return numeric === null ? `--.- ${suffix}` : `${numeric.toFixed(1)} ${suffix}`;
+}
+
+function chartTimeLabel(timestamp) {
+  const ts = Date.parse(timestamp);
+  if (!Number.isFinite(ts)) {
+    return "--:--:--";
+  }
+  return new Date(ts).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
 }
 
 function updateDistrictOptions(boxes) {
@@ -153,11 +190,19 @@ function renderSummary(boxes) {
   const onlineCount = boxes.filter(isOnline).length;
   const loudCount = boxes.filter((box) => String(box.sound_state || "").toUpperCase() === "LOUD").length;
   const avgPm25 = mean(boxes.map((box) => Number(box.pm2_5) || 0));
+  const tempValues = boxes.map((box) => climateValue(box.temperature_c)).filter((value) => value !== null);
+  const humidityValues = boxes.map((box) => climateValue(box.humidity_rh)).filter((value) => value !== null);
 
   totalEl.textContent = String(boxes.length);
   onlineEl.textContent = String(onlineCount);
   loudEl.textContent = String(loudCount);
   avgPm25El.textContent = avgPm25.toFixed(1);
+  if (avgTempEl) {
+    avgTempEl.textContent = tempValues.length ? mean(tempValues).toFixed(1) : "--.-";
+  }
+  if (avgHumidityEl) {
+    avgHumidityEl.textContent = humidityValues.length ? mean(humidityValues).toFixed(1) : "--.-";
+  }
 }
 
 function renderMetricChart(boxes) {
@@ -240,6 +285,8 @@ function renderTable(boxes) {
       <td>${box.name || "NONE"}</td>
       <td>${box.id}</td>
       <td><span class="table-chip ${pmLevelClass(box.pm2_5)}">${Number(box.pm2_5) || 0}</span></td>
+      <td>${climateText(box.temperature_c, "C")}</td>
+      <td>${climateText(box.humidity_rh, "%RH")}</td>
       <td>${box.sound_state || "QUIET"}</td>
       <td>${isOnline(box) ? "ONLINE" : "OFFLINE"}</td>
       <td>${seenText(box)}</td>
@@ -247,18 +294,22 @@ function renderTable(boxes) {
   `).join("");
 }
 
-function renderHistoryChart(history, metrics) {
+function renderTrendChart(targetEl, titleEl, history, metrics, metricTheme, emptyMessage) {
+  if (!targetEl) {
+    return;
+  }
+
   if (!history.length || !metrics.length) {
-    historyChartEl.innerHTML = `
+    targetEl.innerHTML = `
       <text x="50%" y="50%" text-anchor="middle" class="history-empty">
-        ${history.length ? "Select at least one metric" : "No history available"}
+        ${history.length ? "Select at least one metric" : emptyMessage}
       </text>
     `;
     return;
   }
 
-  if (overviewHistoryTitleEl) {
-    overviewHistoryTitleEl.textContent = `${metrics.map(metricLabel).join(" / ")} Trend`;
+  if (titleEl) {
+    titleEl.textContent = `${metrics.map(metricLabel).join(" / ")} Trend`;
   }
 
   const width = 800;
@@ -290,11 +341,6 @@ function renderHistoryChart(history, metrics) {
     return { x, valuesByMetric, timestamp: entry.timestamp };
   });
 
-  const metricTheme = {
-    pm1_0: { line: "history-line-pm1", dot: "history-dot-pm1", area: "history-area-pm1" },
-    pm2_5: { line: "history-line-pm25", dot: "history-dot-pm25", area: "history-area-pm25" },
-    pm10: { line: "history-line-pm10", dot: "history-dot-pm10", area: "history-area-pm10" }
-  };
   const first = pointSet[0];
   const last = pointSet[pointSet.length - 1];
   const seriesSvg = metrics.map((metric) => {
@@ -320,7 +366,7 @@ function renderHistoryChart(history, metrics) {
     `;
   }).join("");
 
-  historyChartEl.innerHTML = `
+  targetEl.innerHTML = `
     <line x1="${paddingLeft}" y1="${chartBottom}" x2="${chartRight}" y2="${chartBottom}" class="history-axis"></line>
     <line x1="${paddingLeft}" y1="${paddingTop}" x2="${paddingLeft}" y2="${chartBottom}" class="history-axis"></line>
     <line x1="${paddingLeft}" y1="${paddingTop}" x2="${chartRight}" y2="${paddingTop}" class="history-grid"></line>
@@ -330,9 +376,42 @@ function renderHistoryChart(history, metrics) {
     <text x="${paddingLeft - 8}" y="${paddingTop + usableHeight / 2 + 4}" text-anchor="end" class="history-tick">${midValue}</text>
     <text x="${paddingLeft - 8}" y="${chartBottom + 4}" text-anchor="end" class="history-tick">${minValue}</text>
     ${seriesSvg}
-    <text x="${first.x}" y="${chartBottom + 20}" text-anchor="start" class="history-footnote">start</text>
-    <text x="${last.x}" y="${chartBottom + 20}" text-anchor="end" class="history-footnote">now</text>
+    <text x="${first.x}" y="${chartBottom + 20}" text-anchor="start" class="history-footnote">${chartTimeLabel(first.timestamp)}</text>
+    <text x="${last.x}" y="${chartBottom + 20}" text-anchor="end" class="history-footnote">${chartTimeLabel(last.timestamp)}</text>
   `;
+}
+
+function renderHistoryChart(history, metrics) {
+  renderTrendChart(
+    historyChartEl,
+    overviewHistoryTitleEl,
+    history,
+    metrics,
+    {
+      pm1_0: { line: "history-line-pm1", dot: "history-dot-pm1", area: "history-area-pm1" },
+      pm2_5: { line: "history-line-pm25", dot: "history-dot-pm25", area: "history-area-pm25" },
+      pm10: { line: "history-line-pm10", dot: "history-dot-pm10", area: "history-area-pm10" }
+    },
+    "No history available"
+  );
+}
+
+function renderClimateHistoryChart(history, metrics) {
+  const climateHistory = history.filter((entry) =>
+    climateValue(entry.temperature_c) !== null || climateValue(entry.humidity_rh) !== null
+  );
+
+  renderTrendChart(
+    climateHistoryChartEl,
+    overviewClimateHistoryTitleEl,
+    climateHistory,
+    metrics,
+    {
+      temperature_c: { line: "history-line-temp", dot: "history-dot-temp", area: "history-area-temp" },
+      humidity_rh: { line: "history-line-humidity", dot: "history-dot-humidity", area: "history-area-humidity" }
+    },
+    "No climate history available"
+  );
 }
 
 async function refreshHistory() {
@@ -348,6 +427,7 @@ async function refreshHistory() {
     const history = await response.json();
     if (!Array.isArray(history)) return;
     renderHistoryChart(history, selectedHistoryMetrics());
+    renderClimateHistoryChart(history, selectedClimateHistoryMetrics());
   } catch (error) {
     console.debug("history refresh failed", error);
   }
@@ -393,7 +473,7 @@ historyBoxEl.addEventListener("change", refreshHistory);
 historyBoxEl.addEventListener("change", () => {
   renderOverview(currentBoxes);
 });
-[historyShowPm1El, historyShowPm25El, historyShowPm10El].forEach((control) => {
+[historyShowPm1El, historyShowPm25El, historyShowPm10El, historyShowTempEl, historyShowHumidityEl].forEach((control) => {
   control?.addEventListener("change", refreshHistory);
 });
 

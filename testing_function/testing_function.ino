@@ -12,12 +12,14 @@
 // Combined demo:
 // - PMS5003 via UART
 // - INMP441 via I2S
-// - OLED NFP1315-157B via I2C
+// - OLED NFP1315-157B + AM2320 via shared I2C
 // - ESP32 config portal via Wi-Fi AP + WebServer
 //
 // Pin plan
-// OLED SDA -> GPIO22
-// OLED SCL -> GPIO23
+// OLED SDA  -> GPIO22
+// OLED SCL  -> GPIO23
+// AM2320 SDA -> GPIO22
+// AM2320 SCL -> GPIO23
 //
 // PMS5003 VCC -> 5V
 // PMS5003 GND -> GND
@@ -35,12 +37,29 @@
 // RED BUTTON -> GPIO33 to GND (uses internal pull-up)
 
 constexpr uint32_t USB_BAUD = 115200;
+constexpr bool SERIAL_LOG_ENABLED = false;
+
+#if SERIAL_LOG_ENABLED
+#define LOG_BEGIN(...) Serial.begin(__VA_ARGS__)
+#define LOG_PRINT(...) Serial.print(__VA_ARGS__)
+#define LOG_PRINTLN(...) Serial.println(__VA_ARGS__)
+#else
+#define LOG_BEGIN(...)
+#define LOG_PRINT(...)
+#define LOG_PRINTLN(...)
+#endif
 
 constexpr uint8_t OLED_ADDR = 0x3C;
 constexpr uint8_t OLED_WIDTH = 128;
 constexpr uint8_t OLED_PAGES = 8;
 constexpr int OLED_SDA_PIN = 22;
 constexpr int OLED_SCL_PIN = 23;
+constexpr uint8_t AM2320_ADDR = 0x5C;
+constexpr uint32_t I2C_CLOCK_HZ = 50000;
+constexpr unsigned long AM2320_READ_MS = 2000;
+constexpr uint8_t AM2320_MAX_RETRIES = 3;
+constexpr uint8_t AM2320_WAKE_DELAY_MS = 10;
+constexpr uint8_t AM2320_MEASURE_DELAY_MS = 10;
 
 constexpr int PMS_RX_PIN = 16;
 constexpr int PMS_TX_PIN = 17;
@@ -54,7 +73,8 @@ constexpr uint32_t MIC_SAMPLE_RATE = 16000;
 constexpr size_t MIC_BLOCK_SAMPLES = 256;
 
 constexpr int CONFIG_BUTTON_PIN = 33;
-constexpr unsigned long CONFIG_HOLD_MS = 1500;
+constexpr unsigned long CONFIG_HOLD_MS = 3000;
+constexpr unsigned long CONFIG_TAP_DEBOUNCE_MS = 1;
 constexpr unsigned long OLED_REFRESH_MS = 300;
 constexpr unsigned long SERIAL_STATUS_MS = 1000;
 constexpr unsigned long REPORT_INTERVAL_MS = 3000;
@@ -100,9 +120,12 @@ bool soundLoud = false;
 bool reportSawLoud = false;
 bool configMode = false;
 bool wifiConnected = false;
+bool climateOk = false;
 bool configButtonLatched = false;
 bool configPortalReady = false;
 bool configQrView = false;
+bool normalScreenTapHandled = false;
+uint8_t normalScreenIndex = 0;
 uint16_t reportPm1Max = 0;
 uint16_t reportPm25Max = 0;
 uint16_t reportPm10Max = 0;
@@ -113,11 +136,14 @@ unsigned long lastSerialStatusMs = 0;
 unsigned long rebootAfterSaveMs = 0;
 unsigned long sensorRecoveryUntilMs = 0;
 unsigned long nextWifiRetryMs = 0;
+unsigned long lastClimateReadMs = 0;
 String configApSsid = "";
 String configApIp = "";
 String configStatusLine = "";
 int qrDrawOriginX = 0;
 int qrDrawOriginY = 0;
+float temperatureC = 0.0f;
+float humidityRh = 0.0f;
 
 const uint8_t digits3x5[][5] = {
   {0b111, 0b101, 0b101, 0b101, 0b111},
@@ -160,6 +186,22 @@ const uint8_t font5x7[][7] = {
   {0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100}, // Y
   {0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111}  // Z
 };
+
+uint16_t crc16Modbus(const uint8_t *data, size_t length) {
+  uint16_t crc = 0xFFFF;
+  for (size_t i = 0; i < length; ++i) {
+    crc ^= data[i];
+    for (uint8_t bit = 0; bit < 8; ++bit) {
+      if (crc & 0x0001) {
+        crc >>= 1;
+        crc ^= 0xA001;
+      } else {
+        crc >>= 1;
+      }
+    }
+  }
+  return crc;
+}
 
 String getBoxId() {
   uint64_t mac = ESP.getEfuseMac();
@@ -483,7 +525,7 @@ bool readPMSdata(HardwareSerial *s) {
   memcpy((void *)&candidate, (void *)buffer_u16, 30);
 
   if (sum != candidate.checksum) {
-    Serial.println("Checksum failure");
+    LOG_PRINTLN("Checksum failure");
     return false;
   }
 
@@ -494,6 +536,82 @@ bool readPMSdata(HardwareSerial *s) {
 void clearPmsInputBuffer() {
   while (pmsSerial.available()) {
     pmsSerial.read();
+  }
+}
+
+bool readAM2320(float &nextTemperatureC, float &nextHumidityRh) {
+  const uint8_t requestFrame[] = {0x03, 0x00, 0x04};
+  const uint8_t expectedBytes = 8;
+
+  for (uint8_t attempt = 1; attempt <= AM2320_MAX_RETRIES; ++attempt) {
+    Wire.beginTransmission(AM2320_ADDR);
+    Wire.endTransmission();
+    delay(AM2320_WAKE_DELAY_MS);
+
+    Wire.beginTransmission(AM2320_ADDR);
+    Wire.write(requestFrame, sizeof(requestFrame));
+    if (Wire.endTransmission() != 0) {
+      delay(5);
+      continue;
+    }
+
+    delay(AM2320_MEASURE_DELAY_MS);
+
+    if (Wire.requestFrom(static_cast<int>(AM2320_ADDR), static_cast<int>(expectedBytes)) != expectedBytes) {
+      while (Wire.available()) {
+        Wire.read();
+      }
+      delay(10);
+      continue;
+    }
+
+    uint8_t buffer[expectedBytes];
+    for (uint8_t i = 0; i < expectedBytes; ++i) {
+      buffer[i] = Wire.read();
+    }
+
+    if (buffer[0] != 0x03 || buffer[1] != 0x04) {
+      delay(10);
+      continue;
+    }
+
+    const uint16_t crcExpected = static_cast<uint16_t>(buffer[7] << 8) | buffer[6];
+    const uint16_t crcActual = crc16Modbus(buffer, 6);
+    if (crcActual != crcExpected) {
+      delay(10);
+      continue;
+    }
+
+    const uint16_t humidityRaw = static_cast<uint16_t>(buffer[2] << 8) | buffer[3];
+    uint16_t temperatureRaw = static_cast<uint16_t>(buffer[4] << 8) | buffer[5];
+    const bool negative = (temperatureRaw & 0x8000) != 0;
+    if (negative) {
+      temperatureRaw &= 0x7FFF;
+    }
+
+    nextHumidityRh = humidityRaw / 10.0f;
+    nextTemperatureC = temperatureRaw / 10.0f;
+    if (negative) {
+      nextTemperatureC = -nextTemperatureC;
+    }
+    return true;
+  }
+
+  return false;
+}
+
+void updateClimateState() {
+  if (lastClimateReadMs != 0 && millis() - lastClimateReadMs < AM2320_READ_MS) {
+    return;
+  }
+
+  lastClimateReadMs = millis();
+  float nextTemperatureC = temperatureC;
+  float nextHumidityRh = humidityRh;
+  climateOk = readAM2320(nextTemperatureC, nextHumidityRh);
+  if (climateOk) {
+    temperatureC = nextTemperatureC;
+    humidityRh = nextHumidityRh;
   }
 }
 
@@ -559,15 +677,6 @@ void updateMicrophoneState() {
 
 void renderHeader() {
   drawRect(0, 0, 128, 64, true);
-  drawText(6, 4, "AIR BOX", 1);
-  const char *status = soundLoud ? "LOUD" : "QUIET";
-  int pillWidth = textWidth(status, 1) + 8;
-  int pillX = 128 - pillWidth - 6;
-  drawRect(pillX, 2, pillWidth, 11, true);
-  drawText(pillX + 4, 4, status, 1);
-  for (int x = 5; x < 123; x += 4) {
-    setPixel(x, 14, true);
-  }
 }
 
 void renderValueCard(int x, int y, int w, int h, const char *title, uint16_t value) {
@@ -582,19 +691,77 @@ void renderValueCard(int x, int y, int w, int h, const char *title, uint16_t val
 }
 
 void renderSoundBar() {
-  drawText(6, 57, "SND", 1);
-  drawRect(28, 54, 94, 7, true);
+  drawText(6, 31, "SND", 1);
+  drawRect(28, 28, 94, 7, true);
   int barWidth = map(constrain(micPeak, 0, SOUND_GAUGE_MAX), 0, SOUND_GAUGE_MAX, 0, 92);
-  fillRect(29, 55, barWidth, 5, true);
+  fillRect(29, 29, barWidth, 5, true);
 }
 
-void renderOLED() {
+void renderPmScreen() {
   clearBuffer();
   renderHeader();
+  drawTextLine(6, 4, "PM DETECTOR", 1);
   renderValueCard(4, 20, 38, 30, "PM1.0", data.pm10_env);
   renderValueCard(45, 20, 38, 30, "PM2.5", data.pm25_env);
   renderValueCard(86, 20, 38, 30, "PM10", data.pm100_env);
+  flushOLED();
+}
+
+void renderClimateScreen() {
+  clearBuffer();
+  renderHeader();
+  drawTextLine(6, 4, "TEMP AND HUMIDITY", 1);
+
+  drawRect(8, 16, 52, 20, true);
+  drawText(12, 20, "TEMP", 1);
+  if (climateOk) {
+    char tempBuf[12];
+    snprintf(tempBuf, sizeof(tempBuf), "%.1fC", temperatureC);
+    drawTextLine(12, 28, tempBuf, 1);
+  } else {
+    drawTextLine(12, 28, "--.-C", 1);
+  }
+
+  drawRect(68, 16, 52, 20, true);
+  drawText(72, 20, "HUM", 1);
+  if (climateOk) {
+    char humBuf[12];
+    snprintf(humBuf, sizeof(humBuf), "%.1f%%", humidityRh);
+    drawTextLine(72, 28, humBuf, 1);
+  } else {
+    drawTextLine(72, 28, "--.-%", 1);
+  }
+
+  drawTextLine(6, 44, climateOk ? "AM2320 OK" : "AM2320 WAIT", 1);
+  drawTextLine(6, 54, wifiConnected ? "WIFI ONLINE" : "WIFI OFFLINE", 1);
+  flushOLED();
+}
+
+void renderSoundScreen() {
+  clearBuffer();
+  renderHeader();
+  drawTextLine(6, 4, "SOUND DETECTOR", 1);
+  drawTextLine(6, 18, soundLoud ? "STATUS LOUD" : "STATUS QUIET", 1);
   renderSoundBar();
+  char peakLine[20];
+  snprintf(peakLine, sizeof(peakLine), "PEAK %ld", static_cast<long>(micPeak));
+  drawTextLine(6, 42, peakLine, 1);
+  drawTextLine(6, 54, soundLoud ? "EVENT ACTIVE" : "EVENT CLEAR", 1);
+  flushOLED();
+}
+
+void renderOLED() {
+  switch (normalScreenIndex % 3) {
+    case 0:
+      renderPmScreen();
+      break;
+    case 1:
+      renderClimateScreen();
+      break;
+    default:
+      renderSoundScreen();
+      break;
+  }
   flushOLED();
 }
 
@@ -682,7 +849,7 @@ void renderWifiConnectOLED(const String &ssid, const String &statusLine) {
 
 bool connectToSavedWifi() {
   if (settings.wifiSsid.isEmpty()) {
-    Serial.println("WiFi skipped: no saved SSID");
+    LOG_PRINTLN("WiFi skipped: no saved SSID");
     wifiConnected = false;
     return false;
   }
@@ -692,15 +859,15 @@ bool connectToSavedWifi() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(settings.wifiSsid.c_str(), settings.wifiPassword.c_str());
 
-  Serial.print("Connecting to WiFi SSID: ");
-  Serial.println(settings.wifiSsid);
+  LOG_PRINT("Connecting to WiFi SSID: ");
+  LOG_PRINTLN(settings.wifiSsid);
   renderWifiConnectOLED(settings.wifiSsid, "CONNECTING...");
 
   unsigned long started = millis();
   int dotCount = 0;
   while (WiFi.status() != WL_CONNECTED && millis() - started < WIFI_CONNECT_TIMEOUT_MS) {
     delay(250);
-    Serial.print(".");
+    LOG_PRINT(".");
     dotCount = (dotCount + 1) % 7;
     String statusLine = "CONNECTING";
     for (int i = 0; i < dotCount; ++i) {
@@ -708,18 +875,18 @@ bool connectToSavedWifi() {
     }
     renderWifiConnectOLED(settings.wifiSsid, statusLine);
   }
-  Serial.println();
+  LOG_PRINTLN();
 
   wifiConnected = WiFi.status() == WL_CONNECTED;
   if (wifiConnected) {
     nextWifiRetryMs = 0;
-    Serial.print("WiFi connected, IP: ");
-    Serial.println(WiFi.localIP());
+    LOG_PRINT("WiFi connected, IP: ");
+    LOG_PRINTLN(WiFi.localIP());
     renderWifiConnectOLED(settings.wifiSsid, "COMPLETE");
     delay(700);
   } else {
     nextWifiRetryMs = millis() + WIFI_RETRY_AFTER_FAIL_MS;
-    Serial.println("WiFi connect failed");
+    LOG_PRINTLN("WiFi connect failed");
     renderWifiConnectOLED(settings.wifiSsid, "CONNECTION FAIL");
     delay(900);
   }
@@ -777,12 +944,12 @@ bool ensureWifiConnected() {
 void postSensorData() {
   const String url = reportUrl();
   if (url.isEmpty()) {
-    Serial.println("POST skipped: server IP not set");
+    LOG_PRINTLN("POST skipped: server IP not set");
     return;
   }
 
   if (!ensureWifiConnected()) {
-    Serial.println("POST skipped: WiFi offline");
+    LOG_PRINTLN("POST skipped: WiFi offline");
     return;
   }
 
@@ -791,7 +958,7 @@ void postSensorData() {
   http.addHeader("Content-Type", "application/json");
 
   String payload;
-  payload.reserve(160);
+  payload.reserve(220);
   payload += "{\"id\":\"";
   payload += currentBoxId();
   payload += "\",\"pm1_0\":";
@@ -800,18 +967,22 @@ void postSensorData() {
   payload += String(reportPm25Max);
   payload += ",\"pm10\":";
   payload += String(reportPm10Max);
+  payload += ",\"temperature_c\":";
+  payload += climateOk ? String(temperatureC, 1) : "null";
+  payload += ",\"humidity_rh\":";
+  payload += climateOk ? String(humidityRh, 1) : "null";
   payload += ",\"sound_state\":\"";
   payload += (reportSawLoud ? "LOUD" : "QUIET");
   payload += "\"}";
 
   const int httpCode = http.POST(payload);
-  Serial.print("POST ");
-  Serial.print(url);
-  Serial.print(" -> ");
-  Serial.println(httpCode);
+  LOG_PRINT("POST ");
+  LOG_PRINT(url);
+  LOG_PRINT(" -> ");
+  LOG_PRINTLN(httpCode);
   if (httpCode > 0) {
     String response = http.getString();
-    Serial.println(response);
+    LOG_PRINTLN(response);
   }
   http.end();
 
@@ -900,7 +1071,7 @@ void endConfigPortal() {
   sensorRecoveryUntilMs = millis() + SENSOR_RECOVERY_MS;
   resetReportWindow();
   lastReportMs = millis();
-  Serial.println("CONFIG MODE disabled");
+  LOG_PRINTLN("CONFIG MODE disabled");
 }
 
 void beginConfigPortal() {
@@ -931,13 +1102,13 @@ void beginConfigPortal() {
   configQrView = false;
   rebootAfterSaveMs = 0;
 
-  Serial.println("CONFIG MODE enabled");
-  Serial.print("Config AP SSID: ");
-  Serial.println(apSsid);
-  Serial.print("Open browser at: http://");
-  Serial.println(ip);
-  Serial.println("Captive portal enabled: phone should open config page automatically");
-  Serial.println("Hold red button " + configHoldSecondsLabel() + "s again to exit config mode");
+  LOG_PRINTLN("CONFIG MODE enabled");
+  LOG_PRINT("Config AP SSID: ");
+  LOG_PRINTLN(apSsid);
+  LOG_PRINT("Open browser at: http://");
+  LOG_PRINTLN(ip);
+  LOG_PRINTLN("Captive portal enabled: phone should open config page automatically");
+  LOG_PRINTLN("Hold red button " + configHoldSecondsLabel() + "s again to exit config mode");
 
   renderConfigOLED(apSsid, ip.toString(), "WAITING");
 }
@@ -946,11 +1117,21 @@ void updateConfigButton() {
   const bool pressed = digitalRead(CONFIG_BUTTON_PIN) == LOW;
 
   if (!pressed) {
-    if (configButtonPressMs != 0 && !configButtonLatched && configMode) {
-      configQrView = !configQrView;
-      renderConfigOLED(configApSsid, configApIp, configStatusLine);
+    if (configButtonPressMs != 0 && !configButtonLatched) {
+      const unsigned long pressDuration = millis() - configButtonPressMs;
+      LOG_PRINT("BUTTON RELEASE ms=");
+      LOG_PRINTLN(pressDuration);
+      if (pressDuration >= CONFIG_TAP_DEBOUNCE_MS) {
+        if (configMode) {
+          configQrView = !configQrView;
+          LOG_PRINT("CONFIG VIEW -> ");
+          LOG_PRINTLN(configQrView ? "QR" : "INFO");
+          renderConfigOLED(configApSsid, configApIp, configStatusLine);
+        }
+      }
     }
     configButtonLatched = false;
+    normalScreenTapHandled = false;
     configButtonPressMs = 0;
     return;
   }
@@ -961,74 +1142,100 @@ void updateConfigButton() {
 
   if (configButtonPressMs == 0) {
     configButtonPressMs = millis();
+    LOG_PRINTLN("BUTTON PRESS");
     return;
+  }
+
+  if (!configMode && !normalScreenTapHandled && millis() - configButtonPressMs >= CONFIG_TAP_DEBOUNCE_MS) {
+    normalScreenIndex = (normalScreenIndex + 1) % 3;
+    LOG_PRINT("OLED PAGE -> ");
+    LOG_PRINTLN(normalScreenIndex + 1);
+    renderOLED();
+    normalScreenTapHandled = true;
   }
 
   if (millis() - configButtonPressMs >= CONFIG_HOLD_MS) {
     configButtonLatched = true;
     if (configMode) {
+      LOG_PRINTLN("BUTTON HOLD -> EXIT CONFIG");
       endConfigPortal();
     } else {
+      LOG_PRINTLN("BUTTON HOLD -> ENTER CONFIG");
       beginConfigPortal();
     }
   }
 }
 
 void printStatus() {
-  Serial.print("PM1.0=");
-  Serial.print(data.pm10_env);
-  Serial.print(" PM2.5=");
-  Serial.print(data.pm25_env);
-  Serial.print(" PM10=");
-  Serial.print(data.pm100_env);
-  Serial.print(" MIC_ENV=");
-  Serial.print(micEnvelope);
-  Serial.print(" MIC_PEAK=");
-  Serial.print(micPeak);
-  Serial.print(" SOUND=");
-  Serial.print(soundLoud ? "LOUD" : "QUIET");
-  Serial.print(" REPORT_PM2.5_MAX=");
-  Serial.print(reportPm25Max);
-  Serial.print(" REPORT_PEAK_MAX=");
-  Serial.print(reportPeakMax);
-  Serial.print(" REPORT_SOUND=");
-  Serial.print(reportSawLoud ? "LOUD" : "QUIET");
-  Serial.print(" WIFI=");
-  Serial.println(wifiConnected ? "ONLINE" : "OFFLINE");
+  LOG_PRINT("PM1.0=");
+  LOG_PRINT(data.pm10_env);
+  LOG_PRINT(" PM2.5=");
+  LOG_PRINT(data.pm25_env);
+  LOG_PRINT(" PM10=");
+  LOG_PRINT(data.pm100_env);
+  LOG_PRINT(" TEMP=");
+  if (climateOk) {
+    LOG_PRINT(temperatureC, 1);
+  } else {
+    LOG_PRINT("--.-");
+  }
+  LOG_PRINT("C HUM=");
+  if (climateOk) {
+    LOG_PRINT(humidityRh, 1);
+  } else {
+    LOG_PRINT("--.-");
+  }
+  LOG_PRINT("%");
+  LOG_PRINT(" MIC_ENV=");
+  LOG_PRINT(micEnvelope);
+  LOG_PRINT(" MIC_PEAK=");
+  LOG_PRINT(micPeak);
+  LOG_PRINT(" SOUND=");
+  LOG_PRINT(soundLoud ? "LOUD" : "QUIET");
+  LOG_PRINT(" REPORT_PM2.5_MAX=");
+  LOG_PRINT(reportPm25Max);
+  LOG_PRINT(" REPORT_PEAK_MAX=");
+  LOG_PRINT(reportPeakMax);
+  LOG_PRINT(" REPORT_SOUND=");
+  LOG_PRINT(reportSawLoud ? "LOUD" : "QUIET");
+  LOG_PRINT(" WIFI=");
+  LOG_PRINTLN(wifiConnected ? "ONLINE" : "OFFLINE");
 }
 
 void setup() {
   pinMode(CONFIG_BUTTON_PIN, INPUT_PULLUP);
 
-  Serial.begin(USB_BAUD);
+  LOG_BEGIN(USB_BAUD);
   Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
-  Wire.setClock(100000);
+  Wire.setClock(I2C_CLOCK_HZ);
   pmsSerial.begin(PMS_BAUD, SERIAL_8N1, PMS_RX_PIN, PMS_TX_PIN);
 
   loadSettings();
 
-  Serial.println();
-  Serial.println("ESP32 air box demo");
-  Serial.println("PMS5003 + INMP441 + OLED");
-  Serial.print("BOX_ID: ");
-  Serial.println(currentBoxId());
-  Serial.print("SERVER_IP: ");
-  Serial.println(settings.serverIp);
-  Serial.print("SERVER_PORT: ");
-  Serial.println(settings.serverPort);
-  Serial.println("Note: PMS5003 has PM1.0 / PM2.5 / PM10, not PM5.");
-  Serial.println("OLED pins: SDA=22 SCL=23");
-  Serial.println("PMS5003 pins: TXD=16 RXD=17");
-  Serial.println("INMP441 pins: SCK=27 WS=14 SD=26 L/R reserved at GPIO12");
-  Serial.println("CONFIG button: GPIO33 -> GND (hold " + configHoldSecondsLabel() + "s to toggle config mode)");
+  LOG_PRINTLN();
+  LOG_PRINTLN("ESP32 air box demo");
+  LOG_PRINTLN("PMS5003 + INMP441 + AM2320 + OLED");
+  LOG_PRINT("BOX_ID: ");
+  LOG_PRINTLN(currentBoxId());
+  LOG_PRINT("SERVER_IP: ");
+  LOG_PRINTLN(settings.serverIp);
+  LOG_PRINT("SERVER_PORT: ");
+  LOG_PRINTLN(settings.serverPort);
+  LOG_PRINTLN("Note: PMS5003 has PM1.0 / PM2.5 / PM10, not PM5.");
+  LOG_PRINTLN("OLED + AM2320 pins: SDA=22 SCL=23");
+  LOG_PRINTLN("PMS5003 pins: TXD=16 RXD=17");
+  LOG_PRINTLN("INMP441 pins: SCK=27 WS=14 SD=26 L/R reserved at GPIO12");
+  LOG_PRINTLN("CONFIG button: GPIO33 -> GND (hold " + configHoldSecondsLabel() + "s to toggle config mode)");
 
   if (!initOLED()) {
-    Serial.println("OLED init failed");
+    LOG_PRINTLN("OLED init failed");
   }
 
   if (!initMicrophone()) {
-    Serial.println("INMP441 init failed");
+    LOG_PRINTLN("INMP441 init failed");
   }
+
+  updateClimateState();
 
   if (digitalRead(CONFIG_BUTTON_PIN) == LOW) {
     delay(CONFIG_HOLD_MS);
@@ -1060,6 +1267,7 @@ void loop() {
   if (sensorRecoveryUntilMs != 0 && millis() < sensorRecoveryUntilMs) {
     clearPmsInputBuffer();
     updateMicrophoneState();
+    updateClimateState();
     if (millis() - lastOledRefreshMs >= OLED_REFRESH_MS) {
       lastOledRefreshMs = millis();
       renderOLED();
@@ -1076,6 +1284,7 @@ void loop() {
   }
 
   updateMicrophoneState();
+  updateClimateState();
   updateReportWindow();
 
   if (millis() - lastOledRefreshMs >= OLED_REFRESH_MS) {

@@ -102,6 +102,49 @@ function pmLevelClass(value) {
   return "pm-level-green";
 }
 
+function climateDisplay(value, suffix) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return `--.- ${suffix}`;
+  }
+  return `${numeric.toFixed(1)} ${suffix}`;
+}
+
+function temperatureLevelClass(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return "";
+  }
+  if (numeric > 37) {
+    return "temp-level-maroon";
+  }
+  if (numeric >= 34) {
+    return "temp-level-red";
+  }
+  if (numeric >= 31) {
+    return "temp-level-orange";
+  }
+  if (numeric >= 28) {
+    return "temp-level-yellow";
+  }
+  if (numeric >= 27) {
+    return "temp-level-lime";
+  }
+  if (numeric >= 25) {
+    return "temp-level-green";
+  }
+  if (numeric >= 20) {
+    return "temp-level-cyan";
+  }
+  if (numeric >= 10) {
+    return "temp-level-sky";
+  }
+  if (numeric >= -2) {
+    return "temp-level-blue";
+  }
+  return "temp-level-indigo";
+}
+
 function statusMeta(box) {
   const seenAt = box.last_seen ? Date.parse(box.last_seen) : NaN;
   const online = Number.isFinite(seenAt) && (Date.now() - seenAt) <= ONLINE_WINDOW_MS;
@@ -163,6 +206,16 @@ function popupHtml(box) {
         <div class="popup-pm-chip ${pmLevelClass(box.pm10)}">
           <span class="popup-pm-label">PM10</span>
           <strong class="popup-pm-value">${box.pm10}</strong>
+        </div>
+      </div>
+        <div class="popup-climate-strip">
+          <div class="popup-climate-chip ${temperatureLevelClass(box.temperature_c)}">
+            <span class="popup-climate-label">TEMP</span>
+            <strong class="popup-climate-value">${climateDisplay(box.temperature_c, "C")}</strong>
+          </div>
+          <div class="popup-climate-chip">
+            <span class="popup-climate-label">HUM</span>
+          <strong class="popup-climate-value">${climateDisplay(box.humidity_rh, "%RH")}</strong>
         </div>
       </div>
       <p class="popup-seen">Last seen ${status.seenText}</p>
@@ -365,6 +418,16 @@ function cardMarkup(box) {
       <div class="pm-chip ${pmLevelClass(box.pm10)}">
         <span class="pm-chip-label">PM10</span>
         <strong class="pm-chip-value">${box.pm10}</strong>
+      </div>
+    </div>
+    <div class="climate-strip">
+      <div class="climate-chip ${temperatureLevelClass(box.temperature_c)}">
+        <span class="climate-chip-label">TEMP</span>
+        <strong class="climate-chip-value">${climateDisplay(box.temperature_c, "C")}</strong>
+      </div>
+      <div class="climate-chip">
+        <span class="climate-chip-label">HUM</span>
+        <strong class="climate-chip-value">${climateDisplay(box.humidity_rh, "%RH")}</strong>
       </div>
     </div>
     <p>${box.lat}, ${box.lng}</p>

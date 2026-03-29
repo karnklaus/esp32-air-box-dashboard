@@ -86,6 +86,20 @@
                     <strong class="pm-chip-value">{{ box.pm10 }}</strong>
                   </div>
                 </div>
+                <div class="climate-strip">
+                  <div class="climate-chip">
+                    <span class="climate-chip-label">Temp</span>
+                    <strong class="climate-chip-value">
+                      {% if box.get('temperature_c') is not none %}{{ '%.1f'|format(box.get('temperature_c')) }} C{% else %}--.- C{% endif %}
+                    </strong>
+                  </div>
+                  <div class="climate-chip">
+                    <span class="climate-chip-label">Hum</span>
+                    <strong class="climate-chip-value">
+                      {% if box.get('humidity_rh') is not none %}{{ '%.1f'|format(box.get('humidity_rh')) }} %RH{% else %}--.- %RH{% endif %}
+                    </strong>
+                  </div>
+                </div>
                 <p>{{ box.lat }}, {{ box.lng }}</p>
               </article>
             {% endfor %}

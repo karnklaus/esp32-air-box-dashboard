@@ -84,6 +84,16 @@
             <h2 id="overview-avg-pm25">0</h2>
             <p class="overview-stat-label">Avg PM2.5</p>
           </article>
+          <article class="overview-stat">
+            <p class="panel-tag">Climate</p>
+            <h2 id="overview-avg-temp">0</h2>
+            <p class="overview-stat-label">Avg Temp (C)</p>
+          </article>
+          <article class="overview-stat">
+            <p class="panel-tag">Climate</p>
+            <h2 id="overview-avg-humidity">0</h2>
+            <p class="overview-stat-label">Avg Humidity (%RH)</p>
+          </article>
         </section>
 
         <section class="overview-grid">
@@ -139,6 +149,28 @@
           <article class="overview-panel overview-panel-wide">
             <div class="panel-head">
               <div>
+                <p class="panel-tag">Climate History</p>
+                <h2 id="overview-climate-history-title">Temp / Hum Trend</h2>
+              </div>
+              <div class="history-legend-toggles">
+                <label class="history-toggle history-toggle-temp">
+                  <input id="history-show-temp" type="checkbox" checked>
+                  <span>TEMP</span>
+                </label>
+                <label class="history-toggle history-toggle-humidity">
+                  <input id="history-show-humidity" type="checkbox" checked>
+                  <span>HUM</span>
+                </label>
+              </div>
+            </div>
+            <div class="history-chart-wrap">
+              <svg id="overview-climate-history-chart" class="history-chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
+            </div>
+          </article>
+
+          <article class="overview-panel overview-panel-wide">
+            <div class="panel-head">
+              <div>
                 <p class="panel-tag">Live Snapshot</p>
               </div>
             </div>
@@ -149,6 +181,8 @@
                     <th>Name</th>
                     <th>ID</th>
                     <th>PM2.5</th>
+                    <th>Temp</th>
+                    <th>Hum</th>
                     <th>Sound</th>
                     <th>Network</th>
                     <th>Last Seen</th>

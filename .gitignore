@@ -1,8 +1,9 @@
 .vscode/
 __pycache__/
 *.pyc
+_docx_extract/
+_report_tmp.zip
 
 data/*.json
 data/*.db
 !data/.gitkeep
-
