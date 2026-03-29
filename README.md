@@ -38,7 +38,7 @@ Flask Server
 
 ### Server
 
-- [app.py](/c:/Users/Ancie/Desktop/embeded/app.py)
+- [app.py](https://github.com/karnklaus/esp32-air-box-dashboard/blob/main/app.py)
   - Flask app
   - Dashboard routes
   - Overview routes
@@ -48,7 +48,7 @@ Flask Server
 
 ### ESP32 Firmware
 
-- [testing_function.ino](/c:/Users/Ancie/Desktop/embeded/testing_function/testing_function.ino)
+- [testing_function.ino](https://github.com/karnklaus/esp32-air-box-dashboard/blob/main/testing_function/testing_function.ino)
   - Main production firmware
   - Reads sensors
   - Drives OLED
@@ -58,21 +58,21 @@ Flask Server
 
 ### Frontend
 
-- [index.html](/c:/Users/Ancie/Desktop/embeded/templates/index.html) - dashboard
-- [overview.html](/c:/Users/Ancie/Desktop/embeded/templates/overview.html) - analytics page
-- [config.html](/c:/Users/Ancie/Desktop/embeded/templates/config.html) - server config page
-- [dashboard.js](/c:/Users/Ancie/Desktop/embeded/static/dashboard.js)
-- [overview.js](/c:/Users/Ancie/Desktop/embeded/static/overview.js)
-- [dashboard.css](/c:/Users/Ancie/Desktop/embeded/static/dashboard.css)
+- [index.html](https://github.com/karnklaus/esp32-air-box-dashboard/blob/main/templates/index.html) - dashboard
+- [overview.html](https://github.com/karnklaus/esp32-air-box-dashboard/blob/main/templates/overview.html) - analytics page
+- [config.html](https://github.com/karnklaus/esp32-air-box-dashboard/blob/main/templates/config.html) - server config page
+- [dashboard.js](https://github.com/karnklaus/esp32-air-box-dashboard/blob/main/static/dashboard.js)
+- [overview.js](https://github.com/karnklaus/esp32-air-box-dashboard/blob/main/static/overview.js)
+- [dashboard.css](https://github.com/karnklaus/esp32-air-box-dashboard/blob/main/static/dashboard.css)
 
 ## Sensor Test Sketches
 
 These folders are intentionally kept in the repository for isolated hardware testing:
 
-- [PMS5003_TEST](/c:/Users/Ancie/Desktop/embeded/PMS5003_TEST/PMS5003_TEST.ino)
-- [INMP441_TEST](/c:/Users/Ancie/Desktop/embeded/INMP441_TEST/INMP441_TEST.ino)
-- [RC522_TEST](/c:/Users/Ancie/Desktop/embeded/RC522_TEST/RC522_TEST.ino)
-- [NFP1315_157B_TEST](/c:/Users/Ancie/Desktop/embeded/NFP1315_157B_TEST/NFP1315_157B_TEST.ino)
+- [PMS5003_TEST](https://github.com/karnklaus/esp32-air-box-dashboard/blob/main/PMS5003_TEST/PMS5003_TEST.ino)
+- [INMP441_TEST](https://github.com/karnklaus/esp32-air-box-dashboard/blob/main/INMP441_TEST/INMP441_TEST.ino)
+- [RC522_TEST](https://github.com/karnklaus/esp32-air-box-dashboard/blob/main/RC522_TEST/RC522_TEST.ino)
+- [NFP1315_157B_TEST](https://github.com/karnklaus/esp32-air-box-dashboard/blob/main/NFP1315_157B_TEST/NFP1315_157B_TEST.ino)
 
 ## Quick Start
 
