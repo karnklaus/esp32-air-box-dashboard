@@ -3,6 +3,11 @@ __pycache__/
 *.pyc
 _docx_extract/
 _report_tmp.zip
+Image/
+รายงานโครงงาน_Air_Box.md
+รายงานโครงงาน_Air_Box.docx
+รายงานโครงงาน_Air_Box.backup.docx
+โครงงานย่อยวิชาปฏิบัติงานสมองกลฝังตัว ภาคเรียนที่ 2.pdf
 
 data/*.json
 data/*.db
