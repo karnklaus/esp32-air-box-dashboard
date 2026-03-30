@@ -1,0 +1,109 @@
+/* ─── Design Tokens ─────────────────────────────────────────── */
+:root {
+  --bg:        #080c14;
+  --surface:   #0f1623;
+  --surface2:  #162032;
+  --border:    #1e2d3d;
+  --text:      #e2e8f0;
+  --muted:     #64748b;
+  --dim:       #94a3b8;
+
+  /* Protocol / signal colors */
+  --teal:      #06b6d4;   /* I2C  */
+  --orange:    #f97316;   /* UART */
+  --purple:    #a855f7;   /* I2S  */
+  --red:       #ef4444;   /* Button / power */
+  --green:     #22c55e;   /* 3.3V */
+  --yellow:    #eab308;   /* 5V   */
+
+  --teal-dim:   #0891b240;
+  --orange-dim: #f9731620;
+  --purple-dim: #a855f720;
+  --red-dim:    #ef444420;
+
+  --nav-h: 56px;
+  --arrows-h: 52px;
+  --section-gap: 80px;
+  --max-w: 1100px;
+  --radius: 10px;
+}
+
+/* ─── Reset ─────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', system-ui, sans-serif;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ─── Typography ─────────────────────────────────────────────── */
+h1 { font-size: clamp(2rem, 5vw, 3.5rem); font-weight: 700; line-height: 1.15; }
+h2 { font-size: clamp(1.4rem, 3vw, 2rem); font-weight: 700; line-height: 1.2; }
+h3 { font-size: 1.15rem; font-weight: 600; }
+p  { color: var(--dim); }
+
+/* ─── Layout helpers ─────────────────────────────────────────── */
+.container {
+  max-width: var(--max-w);
+  margin-inline: auto;
+  padding-inline: 24px;
+}
+
+.section {
+  padding-block: var(--section-gap);
+}
+
+.section-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--teal);
+  margin-bottom: 10px;
+}
+
+.section-title {
+  margin-bottom: 14px;
+}
+
+.section-desc {
+  font-size: 1.05rem;
+  color: var(--dim);
+  max-width: 620px;
+  margin-bottom: 48px;
+}
+
+/* ─── Card ───────────────────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+}
+
+/* ─── Pill / tag ─────────────────────────────────────────────── */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+.pill-teal   { background: var(--teal-dim);   color: var(--teal);   border: 1px solid #06b6d430; }
+.pill-orange { background: var(--orange-dim); color: var(--orange); border: 1px solid #f9731630; }
+.pill-purple { background: var(--purple-dim); color: var(--purple); border: 1px solid #a855f730; }
+.pill-red    { background: var(--red-dim);    color: var(--red);    border: 1px solid #ef444430; }
+
+/* ─── Scrollbar ──────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
