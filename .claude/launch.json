@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "presentation",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "/Users/i2x/Desktop/esp32-air-box-dashboard/presentation",
+      "port": 5173
+    }
+  ]
+}

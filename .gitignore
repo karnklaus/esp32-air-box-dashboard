@@ -12,3 +12,4 @@ Image/
 data/*.json
 data/*.db
 !data/.gitkeep
+.DS_Store
